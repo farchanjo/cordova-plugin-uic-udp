@@ -23,145 +23,168 @@
 
 @implementation UDPTransmit
 {
-	// Regular C implementation:
-	char * messageToSend;
-	struct sockaddr_in broadcastAddr;
-	int DatagramSocketC;
-	Boolean successInitializingTransmitter;
+    // Regular C implementation:
+    char * messageToSend;
+    char messageToReceive[64];
+    struct sockaddr_in broadcastAddr,broadcastRecv;
+    socklen_t addrLen;
+    struct timeval tv;
+    int DatagramSocketC;
+    Boolean successInitializingTransmitter;
 }
 
 // Initializer for the packet and socket, takes a desination IP address and socket number
 - (void) initialize:(CDVInvokedUrlCommand*)command
 {
     [self.commandDelegate runInBackground:^{
-		CDVPluginResult* pluginResult = nil;
-		successInitializingTransmitter = false;
-		// Allocate the memory
-		memset(&broadcastAddr, 0, sizeof broadcastAddr);
-		broadcastAddr.sin_family = AF_INET;
-		
-		// Set the destination IP address
-		const char * ip_address_or_url = ((NSString *)[command.arguments objectAtIndex:0]).cString;
-		// First, assume it's a ddd.ddd.ddd.ddd address
-		int result = inet_pton(AF_INET, ip_address_or_url, &broadcastAddr.sin_addr); // Set the broadcast IP address
-		// If that failed, it might be in www.xxxyyyzzz.com domain name format
-		if (result != 1) { // 1 = SUCCESS
-			// Resolve host name to IP address
-			struct hostent *host_entry = gethostbyname(ip_address_or_url);
-			// If we were able to resolve the IP address from the host name, we're good to initialize
-			if (host_entry != nil) {
-				
-				// Extract the ddd.ddd.ddd.ddd entry from the host_entry
-				char *ip_address_from_url;
-				ip_address_from_url = inet_ntoa(*((struct in_addr *)host_entry->h_addr_list[0]));
-				
-				// Convert ddd.ddd.ddd.ddd to binary form
-				result = inet_pton(AF_INET, ip_address_from_url, &broadcastAddr.sin_addr);
-			}
-		}
-		
-		// If we could resolve it
-		if (result == 1) {
-			
-			// Set the destination port #
-			NSUInteger thePort = [[command.arguments objectAtIndex:1] integerValue];
-			broadcastAddr.sin_port = htons(thePort); // Set port, e.g., 4445
-			
-			// 	Create the socket
-			DatagramSocketC = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
-			int broadcastEnable=1;
-			setsockopt(DatagramSocketC, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, sizeof(broadcastEnable));
-			
-			successInitializingTransmitter = true;
-		}
-		
-		NSString* socket = [NSString stringWithFormat:@"%i", DatagramSocketC];
-		if (DatagramSocketC != 0 && successInitializingTransmitter)
-			pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:[@"Success initializing UDP transmitter using datagram socket: " stringByAppendingString:socket]];
-		else
-			pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[@"Error initializing UDP transmitter using datagram socket: " stringByAppendingString:socket]];
-		
-		[self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
-	}];
+        CDVPluginResult* pluginResult = nil;
+        successInitializingTransmitter = false;
+        // Allocate the memory
+        memset(&broadcastAddr, 0, sizeof broadcastAddr);
+        broadcastAddr.sin_family = AF_INET;
+        
+        // Set the destination IP address
+        const char * ip_address_or_url = ((NSString *)[command.arguments objectAtIndex:0]).cString;
+        // First, assume it's a ddd.ddd.ddd.ddd address
+        int result = inet_pton(AF_INET, ip_address_or_url, &broadcastAddr.sin_addr); // Set the broadcast IP address
+        // If that failed, it might be in www.xxxyyyzzz.com domain name format
+        if (result != 1) { // 1 = SUCCESS
+            // Resolve host name to IP address
+            struct hostent *host_entry = gethostbyname(ip_address_or_url);
+            // If we were able to resolve the IP address from the host name, we're good to initialize
+            if (host_entry != nil) {
+                
+                // Extract the ddd.ddd.ddd.ddd entry from the host_entry
+                char *ip_address_from_url;
+                ip_address_from_url = inet_ntoa(*((struct in_addr *)host_entry->h_addr_list[0]));
+                
+                // Convert ddd.ddd.ddd.ddd to binary form
+                result = inet_pton(AF_INET, ip_address_from_url, &broadcastAddr.sin_addr);
+            }
+        }
+        
+        // If we could resolve it
+        if (result == 1) {
+            
+            // Set the destination port #
+            NSUInteger thePort = [[command.arguments objectAtIndex:1] integerValue];
+            broadcastAddr.sin_port = htons(thePort); // Set port, e.g., 4445
+            
+            //  Create the socket
+            DatagramSocketC = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+            int broadcastEnable=1;
+            setsockopt(DatagramSocketC, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, sizeof(broadcastEnable));
+            
+            successInitializingTransmitter = true;
+        }
+        
+        NSString* socket = [NSString stringWithFormat:@"%i", DatagramSocketC];
+        if (DatagramSocketC != 0 && successInitializingTransmitter)
+            pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:[@"Success initializing UDP transmitter using datagram socket: " stringByAppendingString:socket]];
+        else
+            pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[@"Error initializing UDP transmitter using datagram socket: " stringByAppendingString:socket]];
+        
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+    }];
 }
 
 // Sends a message to the IP and port set up in the initializer
 - (void) sendMessage:(CDVInvokedUrlCommand*)command
 {
-	[self.commandDelegate runInBackground:^{
-		
-		ssize_t result = 0;
-		CDVPluginResult* pluginResult = nil;
-		Boolean messageSent = false;
-		
-		// Only attempt to send a packet if the transmitter initialization was successful
-		if (successInitializingTransmitter) {
-			messageToSend = ((NSString *)[command.arguments objectAtIndex:0]).cString;
-			result = sendto(DatagramSocketC, messageToSend, strlen(messageToSend), 0, (struct sockaddr*)&broadcastAddr, sizeof broadcastAddr);
-			messageSent = true;
-		}
-		
-		if (messageSent)
-			pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:[@"Success transmitting UDP packet: " stringByAppendingString:[command.arguments objectAtIndex:0]]];
-		else
-			pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[@"Error transmitting UDP packet: " stringByAppendingString:[command.arguments objectAtIndex:0]]];
-		
-		[self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
-	}];
+    [self.commandDelegate runInBackground:^{
+        
+        ssize_t result = 0;
+        CDVPluginResult* pluginResult = nil;
+        Boolean messageSent = false;
+        
+        // Only attempt to send a packet if the transmitter initialization was successful
+        if (successInitializingTransmitter) {
+            messageToSend = ((NSString *)[command.arguments objectAtIndex:0]).cString;
+            result = sendto(DatagramSocketC, messageToSend, strlen(messageToSend), 0, (struct sockaddr*)&broadcastAddr, sizeof broadcastAddr);
+            if (result < 0) {
+                perror("sendto");
+            }
+            messageSent = true;
+        }
+        
+        if (messageSent) {
+            tv.tv_sec = 1;
+            tv.tv_usec = 0;
+            memset(&broadcastRecv, 0, sizeof(broadcastRecv));
+            memset(&messageToReceive, 0, sizeof(messageToReceive));
+            addrLen = sizeof(broadcastRecv);
+            broadcastRecv.sin_family = AF_INET;
+            int result = inet_pton(AF_INET, "255.255.255.255", &broadcastRecv.sin_addr);
+            if (result < 0 ) {
+                perror("inet_pton");
+            }
+            setsockopt(DatagramSocketC, SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));
+            result = (int) recvfrom(DatagramSocketC, messageToReceive, sizeof(messageToReceive), 0, (struct sockaddr*)&broadcastRecv, &addrLen);
+            if (result < 0 ) {
+                perror("recvfrom");
+            }
+            pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:[NSString stringWithFormat:@"%s" , messageToReceive]];
+        }
+        else {
+            pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[@"Error transmitting UDP packet: " stringByAppendingString:[command.arguments objectAtIndex:0]]];
+        }
+        
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+    }];
 }
 
 // Returns a ddd.ddd.ddd.ddd type IP address from a named URL host name of type whatever.mydomain.com
 - (void) resolveHostName:(CDVInvokedUrlCommand*)command
 {
-	[self.commandDelegate runInBackground:^{
-		
-		CDVPluginResult* pluginResult = nil;
-		Boolean nameResolved = false;
-		
-		char *ip_address_from_url = "";
-		const char * url = ((NSString *)[command.arguments objectAtIndex:0]).cString;
-		struct hostent *host_entry = gethostbyname(url);
-		if (host_entry != nil) {
-			ip_address_from_url = inet_ntoa(*((struct in_addr *)host_entry->h_addr_list[0]));
-			nameResolved = true;
-		}
-		NSString* return_value = [NSString stringWithUTF8String:ip_address_from_url];
-		
-		if (nameResolved)
-			pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:return_value];
-		else
-			pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[@"Error resolving: " stringByAppendingString:[command.arguments objectAtIndex:0]]];
-		
-		[self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
-	}];
+    [self.commandDelegate runInBackground:^{
+        
+        CDVPluginResult* pluginResult = nil;
+        Boolean nameResolved = false;
+        
+        char *ip_address_from_url = "";
+        const char * url = ((NSString *)[command.arguments objectAtIndex:0]).cString;
+        struct hostent *host_entry = gethostbyname(url);
+        if (host_entry != nil) {
+            ip_address_from_url = inet_ntoa(*((struct in_addr *)host_entry->h_addr_list[0]));
+            nameResolved = true;
+        }
+        NSString* return_value = [NSString stringWithUTF8String:ip_address_from_url];
+        
+        if (nameResolved)
+            pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:return_value];
+        else
+            pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[@"Error resolving: " stringByAppendingString:[command.arguments objectAtIndex:0]]];
+        
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+    }];
 }
 
 // Returns a ddd.ddd.ddd.ddd type IP address from a named URL host name of type whatever.mydomain.com, plus the custom string sent in as a single string, pipe-delimired
 // e.g., "123.456.789.123|mystring" (this can be used to control waht your application does after the callback executes, since custom callbacks aren't possible with plugins)
 - (void) resolveHostNameWithUserDefinedCallbackString:(CDVInvokedUrlCommand*)command
 {
-	[self.commandDelegate runInBackground:^{
-		
-		CDVPluginResult* pluginResult = nil;
-		Boolean nameResolved = false;
-		
-		char *ip_address_from_url = "";
-		const char * url = ((NSString *)[command.arguments objectAtIndex:0]).cString;
-		struct hostent *host_entry = gethostbyname(url);
-		if (host_entry != nil) {
-			ip_address_from_url = inet_ntoa(*((struct in_addr *)host_entry->h_addr_list[0]));
-			nameResolved = true;
-		}
-		NSString* return_value = [NSString stringWithUTF8String:ip_address_from_url];
-		
-		if (nameResolved)
-			pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:[[return_value stringByAppendingString:@"|"]stringByAppendingString:[command.arguments objectAtIndex:1]]];
-		else
-			pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[[return_value stringByAppendingString:@"|"]stringByAppendingString:[command.arguments objectAtIndex:1]]];
-		
-		[self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
-	}];
-	
+    [self.commandDelegate runInBackground:^{
+        
+        CDVPluginResult* pluginResult = nil;
+        Boolean nameResolved = false;
+        
+        char *ip_address_from_url = "";
+        const char * url = ((NSString *)[command.arguments objectAtIndex:0]).cString;
+        struct hostent *host_entry = gethostbyname(url);
+        if (host_entry != nil) {
+            ip_address_from_url = inet_ntoa(*((struct in_addr *)host_entry->h_addr_list[0]));
+            nameResolved = true;
+        }
+        NSString* return_value = [NSString stringWithUTF8String:ip_address_from_url];
+        
+        if (nameResolved)
+            pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:[[return_value stringByAppendingString:@"|"]stringByAppendingString:[command.arguments objectAtIndex:1]]];
+        else
+            pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[[return_value stringByAppendingString:@"|"]stringByAppendingString:[command.arguments objectAtIndex:1]]];
+        
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+    }];
+    
 }
 
 
